@@ -49,6 +49,13 @@ async function purchaseEndpoint<T>(
   const amountRaw: string = accepted.amount ?? '0';
   const amountHuman = (Number(amountRaw) / 1_000_000).toFixed(2);
   const network: string = accepted.network ?? '?';
+  onStep('POST /api/payments/create — quote issued', 'success', {
+    source: 'facilitator',
+    details: {
+      http: `[Facilitator] POST /api/payments/create\nAuthorization: Bearer ***\nContent-Type: application/json\n\nHTTP/1.1 201 Created\n\n  amount:  ${amountRaw} (${amountHuman} USDC)\n  asset:   ${accepted.asset ?? '?'}\n  payTo:   ${accepted.payTo ?? '?'}\n  network: ${network}\n  method:  ${accepted.extra?.assetTransferMethod ?? 'eip3009'}`,
+    },
+  });
+
   onStep(`402 Payment Required — ${amountHuman} USDC`, 'info', {
     source: 'merchant',
     details: {
@@ -137,16 +144,32 @@ async function purchaseEndpoint<T>(
       const errBody: any = await secondRes.json();
       reason = errBody?.error ?? errBody?.message ?? reason;
     } catch { /* ignore */ }
+    onStep('POST /api/payments/verify — signature rejected', 'error', {
+      source: 'facilitator',
+      details: { http: `[Facilitator] POST /api/payments/verify\n\nHTTP/1.1 200 OK\n\n{ "isValid": false, "invalidReason": "${reason}" }` },
+    });
     onStep(`Payment rejected — ${reason}`, 'error', { source: 'merchant' });
     throw new Error(`Payment failed: ${reason}`);
   }
 
   const data = await secondRes.json() as T;
   const paymentResponse = secondRes.headers.get('payment-response');
+  onStep('POST /api/payments/verify — signature valid', 'success', {
+    source: 'facilitator',
+    details: {
+      http: `[Facilitator] POST /api/payments/verify\nAuthorization: Bearer ***\nContent-Type: application/json\n\n  to:      ${accepted.payTo ?? '?'}\n  value:   ${amountRaw} (${amountHuman} USDC)\n  network: ${network}\n\nHTTP/1.1 200 OK\n\n{ "isValid": true }`,
+    },
+  });
   onStep('200 OK — payment accepted', 'success', {
     source: 'merchant',
     details: {
       http: `HTTP/1.1 200 OK\nContent-Type: application/json${paymentResponse ? `\npayment-response: ${paymentResponse}` : ''}\n\n${JSON.stringify(data, null, 2)}`,
+    },
+  });
+  onStep('POST /api/payments/settle — Fireblocks CONTRACT_CALL submitted', 'info', {
+    source: 'facilitator',
+    details: {
+      http: `[Facilitator] POST /api/payments/settle (optimistic — background)\nAuthorization: Bearer ***\nContent-Type: application/json\n\n  value:   ${amountRaw} (${amountHuman} USDC)\n  network: ${network}\n  method:  ${accepted.extra?.assetTransferMethod ?? 'eip3009'}\n\n→ Fireblocks CONTRACT_CALL submitted\n  Awaiting signing request approval in Fireblocks console/app...`,
     },
   });
   return data;
