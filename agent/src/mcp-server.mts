@@ -17,6 +17,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { Wallet, Signature, formatUnits } from 'ethers';
+import { ActivityLog } from './activity.js';
 
 // ── Config ─────────────────────────────────────────────────────────────
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
@@ -144,30 +145,16 @@ async function signEip3009(
   };
 }
 
-type Source = 'agent' | 'merchant' | 'facilitator';
-type Status = '→' | '✓' | '✗';
-type LogStatus = 'info' | 'success' | 'error';
-interface Step { message: string; status: LogStatus; source: Source; details?: unknown; }
-
-function formatStep(source: Source, status: Status, message: string): string {
-  return `[${source}] ${status} ${message}`;
-}
-
-function step(source: Source, status: Status, message: string, details?: unknown): Step {
-  const logStatus: LogStatus = status === '✓' ? 'success' : status === '✗' ? 'error' : 'info';
-  return { message, status: logStatus, source, details };
-}
-
 // ── Core payment flow ──────────────────────────────────────────────────
 async function purchaseEndpoint(endpoint: 'premium' | 'spcx'): Promise<string> {
   const url = `${MERCHANT_BASE}/${endpoint}`;
-  const lines: string[] = [];
-  const steps: Step[] = [];
-
-  const push = (source: Source, status: Status, label: string, details?: unknown) => {
-    lines.push(formatStep(source, status, label));
-    steps.push(step(source, status, label, details));
-  };
+  const log = new ActivityLog();
+  const push = (
+    source: Parameters<ActivityLog['push']>[0],
+    status: Parameters<ActivityLog['push']>[1],
+    label: string,
+    details?: unknown,
+  ) => log.push(source, status, label, details);
 
   push('agent', '→', `GET /${endpoint}`, {
     http: `GET /${endpoint} HTTP/1.1\nHost: ${new URL(url).host}\nAccept: application/json`,
@@ -272,13 +259,13 @@ async function purchaseEndpoint(endpoint: 'premium' | 'spcx'): Promise<string> {
       await fetch(`${MERCHANT_BASE}/agent-data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: `/${endpoint}`, data, steps, payer: wallet.address }),
+        body: JSON.stringify({ endpoint: `/${endpoint}`, data, steps: log.steps(), payer: wallet.address }),
       });
       push('agent', '✓', 'Dashboard updated');
     } catch { /* non-fatal */ }
   }
 
-  return lines.join('\n');
+  return log.text();
 }
 
 // ── MCP server ─────────────────────────────────────────────────────────

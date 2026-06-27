@@ -25,12 +25,15 @@ export interface PremiumData {
   assets: PremiumAsset[];
 }
 
-export interface LogEntry {
-  time: string;
+export interface ActivityStep {
   message: string;
   status: 'info' | 'success' | 'error';
   source?: 'agent' | 'merchant' | 'facilitator';
   details?: unknown;
+}
+
+export interface LogEntry extends ActivityStep {
+  time: string;
 }
 
 export interface SpcxData {

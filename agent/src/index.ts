@@ -25,6 +25,7 @@
 
 import 'dotenv/config';
 import crypto from 'crypto';
+import { ActivityLog } from './activity.js';
 import canonicalize from 'canonicalize';
 import {
   Wallet,
@@ -749,12 +750,13 @@ async function main() {
   console.log(`Target:          ${MERCHANT_URL}`);
   console.log(`Wallet address:  ${wallet.address}`);
 
-  type AgentStep = { message: string; status: 'info' | 'success' | 'error'; source: 'agent' | 'merchant' | 'facilitator'; details?: unknown };
-  const steps: AgentStep[] = [];
+  const log = new ActivityLog();
   const merchantUrl = new URL(MERCHANT_URL);
 
   // 1. Hit the merchant without a signature — expect 402.
-  steps.push({ message: `GET ${merchantUrl.pathname}`, status: 'info', source: 'agent' });
+  log.push('agent', '→', `GET ${merchantUrl.pathname}`, {
+    http: `GET ${merchantUrl.pathname} HTTP/1.1\nHost: ${merchantUrl.host}\nAccept: application/json`,
+  });
   const first = await fetch(MERCHANT_URL);
   if (first.status === 200) {
     console.log('Resource already free (no 402). Body:', await first.text());
@@ -772,7 +774,10 @@ async function main() {
   }
 
   const amountHuman = (Number(quote.accepts[0].amount) / 1_000_000).toFixed(2);
-  steps.push({ message: `402 Payment Required — ${amountHuman} USDC`, status: 'info', source: 'merchant', details: quote });
+  log.push('merchant', '→', `402 Payment Required — ${amountHuman} USDC`, {
+    http: `HTTP/1.1 402 Payment Required\nContent-Type: application/json\n\n${JSON.stringify(quote, null, 2)}`,
+    accepts: quote.accepts,
+  });
 
   console.log(`\n402 quote — ${quote.accepts.length} payment option(s):`);
   for (const a of quote.accepts) {
@@ -826,9 +831,21 @@ async function main() {
       'EIP-3009 TransferWithAuthorization',
     );
     console.log('\nSigning TransferWithAuthorization (EIP-3009)…');
-    steps.push({ message: 'Signing EIP-3009 typed data...', status: 'info', source: 'agent' });
+    const selectedAmount = (Number(accepted.amount) / 1_000_000).toFixed(2);
+    log.push('agent', '→', 'Signing EIP-3009 typed data...', {
+      http: `[Local] EIP-712 signTypedData — no HTTP, no gas\n\nfrom:        ${wallet.address}\nto:          ${accepted.payTo}\nvalue:       ${accepted.amount} (${selectedAmount} USDC)\nnetwork:     ${accepted.network}\ncontract:    ${accepted.asset}\nprimaryType: TransferWithAuthorization`,
+      eip712: {
+        domain: { name: accepted.extra.name, version: accepted.extra.version, chainId, verifyingContract: accepted.asset },
+        primaryType: 'TransferWithAuthorization',
+        message: { from: wallet.address, to: accepted.payTo, value: accepted.amount },
+      },
+    });
     signed = await signEip3009(wallet, accepted, chainId);
-    steps.push({ message: 'EIP-3009 typed data signed', status: 'success', source: 'agent', details: { signature: signed.signature.slice(0, 14) + '…', ...signed.body } });
+    log.push('agent', '✓', 'EIP-3009 typed data signed', {
+      http: `[Signed] TransferWithAuthorization\n\nfrom:        ${wallet.address}\nto:          ${accepted.payTo}\nvalue:       ${accepted.amount} (${selectedAmount} USDC)\nsignature:   ${signed.signature}`,
+      signature: signed.signature,
+      body: signed.body,
+    });
   } else if (mechanism === 'permit2') {
     // Permit2: EOA needs USDC for the transfer, and (if allowance isn't
     // set yet) a tiny amount of gas ETH for the one-time approve tx.
@@ -859,9 +876,15 @@ async function main() {
       console.log(`  allowance OK: ${allowanceStatus.allowance}`);
     }
     console.log('\nSigning Permit2 PermitWitnessTransferFrom…');
-    steps.push({ message: 'Signing Permit2 PermitWitnessTransferFrom...', status: 'info', source: 'agent' });
+    log.push('agent', '→', 'Signing Permit2 PermitWitnessTransferFrom...', {
+      http: `[Local] EIP-712 signTypedData — no HTTP, no gas\n\nfrom:        ${wallet.address}\nto:          ${accepted.payTo}\nvalue:       ${accepted.amount}\nnetwork:     ${accepted.network}\ncontract:    ${accepted.asset}\nprimaryType: PermitWitnessTransferFrom`,
+    });
     signed = await signPermit2(wallet, accepted, chainId);
-    steps.push({ message: 'Permit2 typed data signed', status: 'success', source: 'agent', details: { signature: signed.signature.slice(0, 14) + '…', ...signed.body } });
+    log.push('agent', '✓', 'Permit2 typed data signed', {
+      http: `[Signed] PermitWitnessTransferFrom\n\nfrom:        ${wallet.address}\nto:          ${accepted.payTo}\nvalue:       ${accepted.amount}\nsignature:   ${signed.signature}`,
+      signature: signed.signature,
+      body: signed.body,
+    });
   } else if (mechanism === 'erc7710') {
     // ERC-7710 via EIP-7702: EOA needs USDC (for the eventual transfer)
     // and gas ETH (for the one-time self-upgrade tx).
@@ -888,9 +911,15 @@ async function main() {
       );
     }
     console.log('\nSigning MDF Delegation (EIP-712 against DelegationManager)…');
-    steps.push({ message: 'Signing ERC-7710 delegation (EIP-712)...', status: 'info', source: 'agent' });
+    log.push('agent', '→', 'Signing ERC-7710 delegation (EIP-712)...', {
+      http: `[Local] EIP-712 signTypedData — no HTTP, no gas\n\nfrom:        ${wallet.address}\nnetwork:     ${accepted.network}\ncontract:    ${accepted.asset}\nprimaryType: Delegation`,
+    });
     signed = await signDelegation(wallet, accepted, chainId);
-    steps.push({ message: 'Delegation signed', status: 'success', source: 'agent', details: { signature: signed.signature.slice(0, 14) + '…', ...signed.body } });
+    log.push('agent', '✓', 'Delegation signed', {
+      http: `[Signed] Delegation\n\nfrom:        ${wallet.address}\nsignature:   ${signed.signature}`,
+      signature: signed.signature,
+      body: signed.body,
+    });
     includeEcdsaSignature = false; // server expects payload.delegation, no top-level sig
   } else {
     throw new Error(
@@ -912,7 +941,10 @@ async function main() {
   };
   const header = Buffer.from(JSON.stringify(payload)).toString('base64');
 
-  steps.push({ message: 'Sending signed payment...', status: 'info', source: 'agent' });
+  log.push('agent', '→', 'Sending signed payment...', {
+    http: `GET ${merchantUrl.pathname} HTTP/1.1\nHost: ${merchantUrl.host}\nAccept: application/json\npayment-signature: <base64(x402 payload)>\n\n  x402Version: 2\n  resource:    ${MERCHANT_URL}\n  from:        ${wallet.address}`,
+    payload,
+  });
   console.log(`\nRetrying with payment-signature header…`);
   const second = await fetch(MERCHANT_URL, { headers: { 'payment-signature': header } });
   console.log(`\nMerchant response: ${second.status}`);
@@ -925,13 +957,17 @@ async function main() {
     console.log(text);
   }
 
+  const settlementHeader = second.headers.get('payment-response');
   if (second.ok) {
-    steps.push({ message: '200 OK — payment accepted', status: 'success', source: 'merchant', details: parsedBody });
+    log.push('merchant', '✓', '200 OK — payment accepted', {
+      http: `HTTP/1.1 200 OK\nContent-Type: application/json${settlementHeader ? `\npayment-response: ${settlementHeader}` : ''}\n\n${JSON.stringify(parsedBody, null, 2)}`,
+    });
   } else {
-    steps.push({ message: `Payment rejected — HTTP ${second.status}`, status: 'error', source: 'merchant', details: parsedBody });
+    log.push('merchant', '✗', `Payment rejected — HTTP ${second.status}`, {
+      http: `HTTP/1.1 ${second.status}\nContent-Type: application/json\n\n${JSON.stringify(parsedBody, null, 2)}`,
+    });
   }
 
-  const settlementHeader = second.headers.get('payment-response');
   if (settlementHeader) {
     const decoded = JSON.parse(Buffer.from(settlementHeader, 'base64').toString('utf-8'));
     console.log(`\nPAYMENT-RESPONSE:`);
@@ -947,7 +983,7 @@ async function main() {
       await fetch(agentDataUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint, data: parsedBody, payer: wallet.address, steps }),
+        body: JSON.stringify({ endpoint, data: parsedBody, payer: wallet.address, steps: log.steps() }),
       });
       console.log(`\n[dashboard] Posted result to ${agentDataUrl} — Activity will update.`);
     } catch (err) {

@@ -1,10 +1,10 @@
 import type { Eip3009SignFn } from './wallet';
-import type { PremiumData, SpcxData, PaymentDetails } from './types';
+import type { ActivityStep, PremiumData, SpcxData, PaymentDetails } from './types';
 
 const MERCHANT_URL = 'http://localhost:3010';
 
-export type StepStatus = 'info' | 'success' | 'error';
-export type StepMeta = { source?: 'agent' | 'merchant' | 'facilitator'; details?: unknown };
+export type StepStatus = ActivityStep['status'];
+export type StepMeta = { source?: ActivityStep['source']; details?: unknown };
 export type StepCallback = (step: string, status: StepStatus, meta?: StepMeta) => void;
 export type ConfirmCallback = (details: PaymentDetails) => Promise<boolean>;
 
@@ -16,14 +16,20 @@ async function purchaseEndpoint<T>(
   onStep: StepCallback,
   onConfirm: ConfirmCallback,
 ): Promise<T> {
-  onStep(`GET ${endpoint}`, 'info', { source: 'agent' });
+  onStep(`GET ${endpoint}`, 'info', {
+    source: 'agent',
+    details: { http: `GET ${endpoint} HTTP/1.1\nHost: localhost:3010\nAccept: application/json` },
+  });
 
   const firstRes = await fetch(`${MERCHANT_URL}${endpoint}`);
 
   if (firstRes.status !== 402) {
     if (firstRes.ok) {
       const data = await firstRes.json() as T;
-      onStep('200 OK — access granted (no payment needed)', 'success', { source: 'merchant', details: data });
+      onStep('200 OK — access granted (no payment needed)', 'success', {
+        source: 'merchant',
+        details: { http: `HTTP/1.1 200 OK\nContent-Type: application/json\n\n${JSON.stringify(data, null, 2)}` },
+      });
       return data;
     }
     const errText = await firstRes.text();
@@ -43,7 +49,13 @@ async function purchaseEndpoint<T>(
   const amountRaw: string = accepted.amount ?? '0';
   const amountHuman = (Number(amountRaw) / 1_000_000).toFixed(2);
   const network: string = accepted.network ?? '?';
-  onStep(`402 Payment Required — ${amountHuman} USDC`, 'info', { source: 'merchant', details: body402 });
+  onStep(`402 Payment Required — ${amountHuman} USDC`, 'info', {
+    source: 'merchant',
+    details: {
+      http: `HTTP/1.1 402 Payment Required\nContent-Type: application/json\nPAYMENT-REQUIRED: scheme="exact", price="${amountHuman}", currency="USDC", network="${network}", payTo="${accepted.payTo ?? '?'}"\n\n${JSON.stringify(body402, null, 2)}`,
+      accepts: body402.accepts,
+    },
+  });
 
   const expiresAt = new Date(Date.now() + Math.max(Number(accepted.maxTimeoutSeconds ?? 0), 300) * 1000);
   const confirmed = await onConfirm({
@@ -61,7 +73,17 @@ async function purchaseEndpoint<T>(
     throw new Error('Cancelled');
   }
 
-  onStep('Signing EIP-3009 typed data...', 'info', { source: 'agent' });
+  onStep('Signing EIP-3009 typed data...', 'info', {
+    source: 'agent',
+    details: {
+      http: `[Local] EIP-712 signTypedData — no HTTP, no gas\n\nto:          ${accepted.payTo ?? '?'}\nvalue:       ${accepted.amount} (${amountHuman} USDC)\nnetwork:     ${network}\ncontract:    ${accepted.asset ?? '?'}\nprimaryType: TransferWithAuthorization`,
+      eip712: {
+        domain: { name: accepted.extra?.name, version: accepted.extra?.version, chainId: Number(network.split(':')[1] ?? 84532), verifyingContract: accepted.asset },
+        primaryType: 'TransferWithAuthorization',
+        message: { to: accepted.payTo, value: accepted.amount },
+      },
+    },
+  });
 
   let signature: string;
   let authorization: Record<string, unknown>;
@@ -80,6 +102,7 @@ async function purchaseEndpoint<T>(
   onStep('EIP-3009 typed data signed', 'success', {
     source: 'agent',
     details: {
+      http: `[Signed] TransferWithAuthorization\n\nto:          ${authorization.to}\nvalue:       ${authorization.value} (${amountHuman} USDC)\nsignature:   ${signature}`,
       domain,
       message,
       signature: { r, s, v, serialized: signature },
@@ -89,6 +112,7 @@ async function purchaseEndpoint<T>(
   onStep('Sending signed payment...', 'info', {
     source: 'agent',
     details: {
+      http: `GET ${endpoint} HTTP/1.1\nHost: localhost:3010\nAccept: application/json\npayment-signature: <base64(x402 payload)>\n\n  x402Version: 2\n  resource:    ${MERCHANT_URL}${endpoint}\n  value:       ${accepted.amount} (${amountHuman} USDC)`,
       authorization,
       signature,
       x402Version: 2,
@@ -118,7 +142,13 @@ async function purchaseEndpoint<T>(
   }
 
   const data = await secondRes.json() as T;
-  onStep('200 OK — payment accepted', 'success', { source: 'merchant', details: data });
+  const paymentResponse = secondRes.headers.get('payment-response');
+  onStep('200 OK — payment accepted', 'success', {
+    source: 'merchant',
+    details: {
+      http: `HTTP/1.1 200 OK\nContent-Type: application/json${paymentResponse ? `\npayment-response: ${paymentResponse}` : ''}\n\n${JSON.stringify(data, null, 2)}`,
+    },
+  });
   return data;
 }
 
