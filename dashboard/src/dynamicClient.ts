@@ -5,7 +5,7 @@ export const dynamicClient = createDynamicClient({
   autoInitialize: false,
   environmentId: import.meta.env.VITE_DYNAMIC_ENV_ID as string,
   metadata: {
-    name: 'Bloomberg Terminal',
+    name: 'FBloomberg Terminal',
     universalLink: window.location.origin,
   },
 });

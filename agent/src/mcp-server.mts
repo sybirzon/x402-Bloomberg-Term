@@ -248,7 +248,7 @@ async function purchaseEndpoint(endpoint: 'premium' | 'spcx'): Promise<string> {
     const assets = (data as any).assets as Array<Record<string, unknown>>;
     const ts = (data as any).timestamp as string | undefined;
     tableLines.push('');
-    tableLines.push(`Bloomberg Terminal — Premium Analytics${ts ? `  (${ts})` : ''}`);
+    tableLines.push(`FBloomberg Terminal — Premium Analytics${ts ? `  (${ts})` : ''}`);
     tableLines.push('');
     tableLines.push('Symbol | Price      | 24h Chg | Volume 24h | Mkt Cap | High    | Low     | RSI  | Sentiment');
     tableLines.push('-------|------------|---------|------------|---------|---------|---------|------|----------');
@@ -292,7 +292,7 @@ async function main() {
 
   server.tool(
     'purchase_bloomberg',
-    'Purchase gated Bloomberg Terminal data using an x402 micropayment (EIP-3009 on Base Sepolia).',
+    'Purchase gated FBloomberg Terminal data using an x402 micropayment (EIP-3009 on Base Sepolia).',
     {
       endpoint: z.enum(['premium', 'spcx']).describe(
         '"premium" = premium crypto analytics ($0.01 USDC), "spcx" = SpaceX stock data ($0.02 USDC)',
@@ -311,7 +311,7 @@ async function main() {
 
   server.tool(
     'bloomberg_balance',
-    'Check the USDC and ETH balance of the Bloomberg Terminal payment wallet on Base Sepolia.',
+    'Check the USDC and ETH balance of the FBloomberg Terminal payment wallet on Base Sepolia.',
     {},
     async () => {
       try {

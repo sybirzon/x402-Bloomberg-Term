@@ -444,7 +444,7 @@ export default function App() {
             <path d="M10 9h12.5c4.5 0 7.5 2.2 7.5 6 0 2.2-1.1 3.9-2.8 4.9 2.4.9 3.8 2.8 3.8 5.4 0 4.2-3.2 6.7-8.2 6.7H10V9zm5 9.5h6.8c1.8 0 2.9-.9 2.9-2.4s-1.1-2.4-2.9-2.4H15v4.8zm0 9.8h7.2c2 0 3.2-1 3.2-2.7s-1.2-2.7-3.2-2.7H15v5.4z" fill="white"/>
           </svg>
           <div className="header-text">
-            <span className="header-brand">BLOOMBERG</span>
+            <span className="header-brand">FBLOOMBERG</span>
             <span className="header-product">TERMINAL</span>
           </div>
         </div>

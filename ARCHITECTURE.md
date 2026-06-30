@@ -1,4 +1,4 @@
-# Bloomberg Terminal — x402 Payment Flow
+# FBloomberg Terminal — x402 Payment Flow
 
 ```mermaid
 sequenceDiagram
