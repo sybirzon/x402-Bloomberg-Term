@@ -173,6 +173,8 @@ export default function App() {
     let lastSpcxTs = 0;
     let lastPremiumStepCount = 0;
     let lastSpcxStepCount = 0;
+    let lastPremiumPaymentId = '';
+    let lastSpcxPaymentId = '';
     const id = setInterval(async () => {
       try {
         const [premiumRes, spcxRes] = await Promise.all([
@@ -180,14 +182,15 @@ export default function App() {
           fetch(`${MERCHANT_URL}/agent-data?endpoint=/spcx`),
         ]);
         type AgentStep = { message: string; status: 'info' | 'success' | 'error'; source: 'agent' | 'merchant' | 'facilitator' | 'fireblocks'; dest?: 'agent' | 'merchant' | 'facilitator' | 'fireblocks'; details?: unknown };
-        type AgentEntry = { data: unknown; ts?: number; steps?: AgentStep[]; payer?: string };
+        type AgentEntry = { data: unknown; ts?: number; steps?: AgentStep[]; payer?: string; paymentId?: string };
         const premium = await premiumRes.json() as AgentEntry;
         if (!premium.data && !(premium.steps?.length)) {
-          if (lastPremiumTs !== 0) { lastPremiumTs = 0; lastPremiumStepCount = 0; setPremiumData(null); }
+          if (lastPremiumTs !== 0) { lastPremiumTs = 0; lastPremiumStepCount = 0; lastPremiumPaymentId = ''; setPremiumData(null); }
         } else {
           const steps = premium.steps ?? [];
-          // Detect new payment (step count reset means a new run started)
-          if (steps.length < lastPremiumStepCount) lastPremiumStepCount = 0;
+          // Detect new payment — prefer paymentId change; fall back to step count decrease
+          const isNewPremiumPayment = (premium.paymentId ? premium.paymentId !== lastPremiumPaymentId : steps.length < lastPremiumStepCount);
+          if (isNewPremiumPayment) { lastPremiumStepCount = 0; if (premium.paymentId) lastPremiumPaymentId = premium.paymentId; }
           if (steps.length > lastPremiumStepCount) {
             steps.slice(lastPremiumStepCount).forEach((s) => addLog(s.message, s.status, { source: s.source, dest: s.dest, details: s.details }));
             lastPremiumStepCount = steps.length;
@@ -205,10 +208,11 @@ export default function App() {
         }
         const spcx = await spcxRes.json() as AgentEntry;
         if (!spcx.data && !(spcx.steps?.length)) {
-          if (lastSpcxTs !== 0) { lastSpcxTs = 0; lastSpcxStepCount = 0; setSpcxData(null); }
+          if (lastSpcxTs !== 0) { lastSpcxTs = 0; lastSpcxStepCount = 0; lastSpcxPaymentId = ''; setSpcxData(null); }
         } else {
           const steps = spcx.steps ?? [];
-          if (steps.length < lastSpcxStepCount) lastSpcxStepCount = 0;
+          const isNewSpcxPayment = (spcx.paymentId ? spcx.paymentId !== lastSpcxPaymentId : steps.length < lastSpcxStepCount);
+          if (isNewSpcxPayment) { lastSpcxStepCount = 0; if (spcx.paymentId) lastSpcxPaymentId = spcx.paymentId; }
           if (steps.length > lastSpcxStepCount) {
             steps.slice(lastSpcxStepCount).forEach((s) => addLog(s.message, s.status, { source: s.source, dest: s.dest, details: s.details }));
             lastSpcxStepCount = steps.length;
@@ -398,13 +402,15 @@ export default function App() {
     if (!wallet || isPurchasingSpcx || isSettlingSpcx) return;
     setIsPurchasingSpcx(true);
     const startedAt = Date.now();
+    spcxSettlementGen.current += 1;
+    const gen = spcxSettlementGen.current;
     try {
       const balanceBefore = usdcBalance;
       const data = await purchaseSpcx(buildSignFn(), wallet.address, addLog, requestConfirm);
       setSpcxData(data);
       setIsPurchasingSpcx(false);
       setIsSettlingSpcx(true);
-      await pollUntilSettled(balanceBefore, () => {}, undefined, startedAt);
+      await pollUntilSettled(balanceBefore, () => {}, undefined, startedAt, () => spcxSettlementGen.current === gen);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addLog(`Payment error — ${msg}`, 'error', { source: 'agent' });
@@ -418,13 +424,15 @@ export default function App() {
     if (!wallet || isPurchasing || isSettlingPremium) return;
     setIsPurchasing(true);
     const startedAt = Date.now();
+    premiumSettlementGen.current += 1;
+    const gen = premiumSettlementGen.current;
     try {
       const balanceBefore = usdcBalance;
       const data = await purchasePremium(buildSignFn(), wallet.address, addLog, requestConfirm);
       setPremiumData(data);
       setIsPurchasing(false);
       setIsSettlingPremium(true);
-      await pollUntilSettled(balanceBefore, () => {}, undefined, startedAt);
+      await pollUntilSettled(balanceBefore, () => {}, undefined, startedAt, () => premiumSettlementGen.current === gen);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addLog(`Payment error — ${msg}`, 'error', { source: 'agent' });

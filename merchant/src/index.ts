@@ -59,7 +59,7 @@ const GATED_PATHS = new Set(['/premium', '/spcx']);
 
 type AgentStep = { message: string; status: 'info' | 'success' | 'error'; source: 'agent' | 'merchant' | 'facilitator' | 'fireblocks'; dest?: 'agent' | 'merchant' | 'facilitator' | 'fireblocks'; details?: unknown };
 // Last data purchased by the MCP agent, keyed by endpoint
-const agentDataStore = new Map<string, { data: unknown; ts: number; steps?: AgentStep[]; payer?: string }>();
+const agentDataStore = new Map<string, { data: unknown; ts: number; steps?: AgentStep[]; payer?: string; paymentId?: string }>();
 
 interface SettlementRecord {
   status: 'submitted' | 'confirmed' | 'failed';
@@ -129,7 +129,7 @@ globalThis.fetch = async (input: Parameters<typeof _origFetch>[0], init?: Parame
     if (init?.body) {
       try {
         const parsed = JSON.parse(init.body as string);
-        log(`  body: ${JSON.stringify(parsed).slice(0, 300)}`);
+        log(`  body: ${JSON.stringify(parsed, null, 2)}`);
       } catch { /* non-JSON body */ }
     }
   }
@@ -141,7 +141,7 @@ globalThis.fetch = async (input: Parameters<typeof _origFetch>[0], init?: Parame
     let bodyText = '';
     try { bodyText = JSON.stringify(await clone.json()); } catch { /* ignore */ }
     log(`[facilitator → merchant] ${response.status} ${response.statusText}`);
-    if (bodyText) log(`  body: ${bodyText.slice(0, 300)}`);
+    if (bodyText) log(`  body: ${JSON.stringify(JSON.parse(bodyText), null, 2)}`);
   }
 
   return response;
@@ -193,6 +193,7 @@ app.use(
     facilitatorUrl: FACILITATOR_URL,
     apiKey: FACILITATOR_API_KEY,
     settlement: SETTLEMENT_MODE,
+    timeoutMs: 120_000,
     products: [
       { endpoint: '/premium', productId: PREMIUM_PRODUCT_ID },
       { endpoint: '/spcx', productId: SPCX_PRODUCT_ID },
@@ -267,16 +268,20 @@ app.get('/settlement-status', (req, res) => {
 
 // MCP agent posts purchased data here; dashboard polls to display it
 app.post('/agent-data', (req, res) => {
-  const { endpoint, data, steps, payer, partial } = req.body as { endpoint: string; data: unknown; steps?: AgentStep[]; payer?: string; partial?: boolean };
+  const { endpoint, data, steps, payer, partial, paymentId } = req.body as { endpoint: string; data: unknown; steps?: AgentStep[]; payer?: string; partial?: boolean; paymentId?: string };
   if (!endpoint) { res.status(400).json({ error: 'missing endpoint' }); return; }
   if (partial) {
-    // Incremental step stream — preserve existing data and ts, only update steps
     const existing = agentDataStore.get(endpoint);
+    // New payment when paymentId changes — reset store; same payment enforces monotonic step count
+    const isNewPayment = paymentId !== undefined && paymentId !== existing?.paymentId;
+    const existingSteps = isNewPayment ? [] : (existing?.steps ?? []);
+    const updatedSteps = (steps?.length ?? 0) >= existingSteps.length ? (steps ?? existingSteps) : existingSteps;
     agentDataStore.set(endpoint, {
-      data: existing?.data ?? null,
-      ts: existing?.ts ?? Date.now(),
-      steps,
-      payer: payer ?? existing?.payer,
+      data: isNewPayment ? null : (existing?.data ?? null),
+      ts: isNewPayment ? Date.now() : (existing?.ts ?? Date.now()),
+      steps: updatedSteps,
+      payer: payer ?? (isNewPayment ? undefined : existing?.payer),
+      paymentId: paymentId ?? existing?.paymentId,
     });
     res.json({ ok: true });
     return;
@@ -285,7 +290,7 @@ app.post('/agent-data', (req, res) => {
   log(`\n[agent → merchant] POST /agent-data — storing result for ${endpoint}`);
   if (payer) log(`  payer: ${payer}`);
   if (steps?.length) log(`  steps: ${steps.length} activity entries`);
-  agentDataStore.set(endpoint, { data, ts: Date.now(), steps, payer });
+  agentDataStore.set(endpoint, { data, ts: Date.now(), steps, payer, paymentId });
   res.json({ ok: true });
 });
 
@@ -293,7 +298,7 @@ app.get('/agent-data', (req, res) => {
   const endpoint = (req.query.endpoint as string | undefined) ?? '/premium';
   const entry = agentDataStore.get(endpoint);
   if (!entry) { res.json({ data: null }); return; }
-  res.json({ data: entry.data, ts: entry.ts, steps: entry.steps, payer: entry.payer });
+  res.json({ data: entry.data, ts: entry.ts, steps: entry.steps, payer: entry.payer, paymentId: entry.paymentId });
 });
 
 app.post('/reset', (_req, res) => {

@@ -24,6 +24,7 @@ export class ActivityLog {
   private readonly _steps: ActivityStep[] = [];
   private readonly _lines: string[] = [];
   private _streamFn?: (steps: ActivityStep[]) => void;
+  readonly paymentId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
   streamTo(fn: (steps: ActivityStep[]) => void): this {
     this._streamFn = fn;

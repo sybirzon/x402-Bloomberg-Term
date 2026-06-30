@@ -756,7 +756,7 @@ async function main() {
     fetch(`${merchantUrl.origin}/agent-data`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: merchantUrl.pathname, data: null, steps, payer: wallet.address, partial: true }),
+      body: JSON.stringify({ endpoint: merchantUrl.pathname, data: null, steps, payer: wallet.address, partial: true, paymentId: log.paymentId }),
     }).catch(() => {});
   });
 
@@ -1002,7 +1002,7 @@ async function main() {
       await fetch(agentDataUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint, data: parsedBody, payer: wallet.address, steps: log.steps() }),
+        body: JSON.stringify({ endpoint, data: parsedBody, payer: wallet.address, steps: log.steps(), paymentId: log.paymentId }),
       });
       console.log(`\n[dashboard] Posted result to ${agentDataUrl} — Activity will update.`);
     } catch (err) {

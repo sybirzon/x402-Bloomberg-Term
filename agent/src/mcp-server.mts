@@ -153,7 +153,7 @@ async function purchaseEndpoint(endpoint: 'premium' | 'spcx'): Promise<string> {
     fetch(`${MERCHANT_BASE}/agent-data`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: `/${endpoint}`, data: null, steps, payer: wallet.address, partial: true }),
+      body: JSON.stringify({ endpoint: `/${endpoint}`, data: null, steps, payer: wallet.address, partial: true, paymentId: log.paymentId }),
     }).catch(() => {});
   });
   const push = (
@@ -276,7 +276,7 @@ async function purchaseEndpoint(endpoint: 'premium' | 'spcx'): Promise<string> {
       await fetch(`${MERCHANT_BASE}/agent-data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: `/${endpoint}`, data, steps: log.steps(), payer: wallet.address }),
+        body: JSON.stringify({ endpoint: `/${endpoint}`, data, steps: log.steps(), payer: wallet.address, paymentId: log.paymentId }),
       });
     } catch { /* non-fatal */ }
   }
