@@ -1,4 +1,4 @@
-# Bloomberg Terminal × x402 — Teammate Setup Guide
+# FBloomberg Terminal × x402 — Teammate Setup Guide
 
 This guide is for **anyone running the demo on their own laptop** with their **own Fireblocks workspace and own agent wallet**. Nothing here is workspace-specific — you supply your own credentials.
 
@@ -92,7 +92,7 @@ This file is for **your** convenience — neither the setup script nor Claude Co
 Open Claude Code in your home directory. Paste **everything** between the dashes below as a single message. Claude will execute the steps, asking you for input only where strictly necessary.
 
 ```
-I want to set up the Bloomberg Terminal × x402 micropayments demo on this laptop.
+I want to set up the FBloomberg Terminal × x402 micropayments demo on this laptop.
 
 The repo is github.com/sybirzon/x402-Bloomberg-Term. I have already completed Part A
 of the teammate setup guide (toolchain installed, Fireblocks vault + API key + PEM
